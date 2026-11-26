@@ -1,0 +1,48 @@
+# 运行时产物与本地环境
+__pycache__/
+*.pyc
+*.pyo
+.tmp/
+logs/*.log
+logs/*.log.bak
+
+# 备份包（体积大，不入库）
+backup/
+*.zip
+
+# 本地缓存与临时文件
+cert/logo_cache/
+cert/_*.json
+cert/*.bak
+assets/cert/out_*.jpg
+assets/cert/out_*.png
+assets/cert/_*.png
+assets/cert/_*.jpg
+assets/cert/proof_*.jpg
+assets/cert/ext/_*.png
+assets/cert/ext/_*.jpg
+assets/cert/ext/smp_*.jpg
+assets/cert/ext/smp_*.png
+assets/cert/ext/out_ext.jpg
+assets/cert/ext/out_ext.png
+assets/compare.png
+
+# Aurabot 运行时
+aurabot/**/.aurabot-cache/
+aurabot/**/modules-data/
+
+# 本地配置（含机器相关绝对路径）
+cert/napcat.json
+
+# 与本技能无关的本地目录
+doubao-plugin/
+idcard_fix/
+tmp_idfix/
+重启DSH-激活插件市场.ps1
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store

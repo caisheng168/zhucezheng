@@ -1,0 +1,196 @@
+{
+  "_comment": "商标续展注册证明 · 版式（模板有效期 2019-04-01 ~ 2026-11-01）",
+  "template": "assets/cert/ext/template.jpg",
+  "output": "assets/cert/ext/out_ext.jpg",
+  "quality": 92,
+  "data": {
+    "pdf417": "B1021TMXZ20210000222469XZHZ0100014",
+    "code_text": "*TMXZ20210000222469XZHZ01*",
+    "reg_no": "9299063",
+    "cls": "7",
+    "cls_tail": "类续展注册。",
+    "date_y": "2035",
+    "date_m": "12",
+    "date_d": "20"
+  },
+  "fields": [
+    {
+      "key": "pdf417",
+      "type": "pdf417",
+      "region": [
+        180,
+        176,
+        600,
+        230
+      ],
+      "pos": [
+        186,
+        183
+      ],
+      "size": [
+        372,
+        41
+      ],
+      "columns": 4,
+      "level": 4,
+      "pad": 2
+    },
+    {
+      "key": "code_text",
+      "type": "text",
+      "region": [
+        234,
+        228,
+        584,
+        252
+      ],
+      "font": "heiti",
+      "mode": "fit_width",
+      "stroke": 1,
+      "blur": 0.2,
+      "alpha": 1.0,
+      "pad": 5,
+      "kill_dark": 214
+    },
+    {
+      "key": "cls_tail",
+      "type": "text",
+      "region": [
+        736,
+        478,
+        958,
+        530
+      ],
+      "font": "songti",
+      "mode": "natural",
+      "size": 40,
+      "spacing": 0,
+      "hscale": 1.0,
+      "blur": 1.2,
+      "stroke": 0,
+      "alpha": 0.95,
+      "pad": 5,
+      "dx": 0
+    },
+    {
+      "key": "cls",
+      "type": "text",
+      "region": [
+        694,
+        480,
+        732,
+        530
+      ],
+      "font": "songti",
+      "mode": "natural",
+      "hscale": 1.0,
+      "align": "center",
+      "blur": 1.0,
+      "stroke": 0,
+      "alpha": 1.0,
+      "pad": 5,
+      "center_box": [
+        691,
+        736
+      ],
+      "size": 40,
+      "font_path": "C:\\Windows\\Fonts\\AdobeSongStd-Light.otf"
+    },
+    {
+      "type": "text",
+      "font_path": "C:\\Windows\\Fonts\\AdobeSongStd-Light.otf",
+      "mode": "natural",
+      "size": 40,
+      "stroke": 0,
+      "hscale": 1.0,
+      "blur": 1.0,
+      "alpha": 0.95,
+      "pad": 5,
+      "align": "center",
+      "key": "date_y",
+      "region": [
+        583,
+        600,
+        664,
+        655
+      ],
+      "center_box": [
+        583,
+        664
+      ]
+    },
+    {
+      "type": "text",
+      "font_path": "C:\\Windows\\Fonts\\AdobeSongStd-Light.otf",
+      "mode": "natural",
+      "size": 40,
+      "stroke": 0,
+      "hscale": 1.0,
+      "blur": 1.0,
+      "alpha": 0.95,
+      "pad": 5,
+      "align": "center",
+      "key": "date_m",
+      "region": [
+        724,
+        600,
+        764,
+        655
+      ],
+      "center_box": [
+        724,
+        764
+      ]
+    },
+    {
+      "type": "text",
+      "font_path": "C:\\Windows\\Fonts\\AdobeSongStd-Light.otf",
+      "mode": "natural",
+      "size": 40,
+      "stroke": 0,
+      "hscale": 1.0,
+      "blur": 1.0,
+      "alpha": 0.95,
+      "pad": 5,
+      "align": "center",
+      "key": "date_d",
+      "region": [
+        828,
+        600,
+        866,
+        655
+      ],
+      "center_box": [
+        828,
+        866
+      ]
+    },
+    {
+      "key": "reg_no",
+      "type": "text",
+      "region": [
+        378,
+        478,
+        528,
+        530
+      ],
+      "font": "songti",
+      "mode": "natural",
+      "hscale": 1.0,
+      "align": "center",
+      "blur": 1.0,
+      "stroke": 0,
+      "alpha": 1.0,
+      "pad": 5,
+      "center_box": [
+        372,
+        534
+      ],
+      "size": 40,
+      "font_path": "C:\\Windows\\Fonts\\AdobeSongStd-Light.otf"
+    }
+  ],
+  "fonts": {
+    "adobe_song": "C:\\Windows\\Fonts\\AdobeSongStd-Light.otf"
+  }
+}

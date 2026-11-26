@@ -1,0 +1,231 @@
+{
+  "_comment": "固定模板 · 只改内容 · 输出恒为 assets/cert/out_v3.jpg",
+  "template": "assets/cert/template.jpg",
+  "output": "assets/cert/out_v3.jpg",
+  "quality": 90,
+  "data": {
+    "pdf417": "B1021TMZC00000042500948ZCZC0100014",
+    "code_text": "*TMZC42500948D01T200928*",
+    "cert_no": "42500948",
+    "logo": "assets/cert/logo_fenjiu.jpg",
+    "goods": "第 33 类：果酒（含酒精）；葡萄酒；利口酒；清酒（日本米酒）；酒精饮料原汁；酒精饮料（啤酒除外）；米酒；白酒；食用酒精；烧酒（截止）",
+    "holder": "山西杏花村汾酒厂股份有限公司",
+    "addr": "山西省吕梁市汾阳市杏花村",
+    "date_from": "2020年09月07日",
+    "date_to": "2030年09月06日",
+    "qr": "https://pub.sbj.cnipa.gov.cn/toas-pub-prod/portalui-pub-prod/registerNoticeMobile?regNum=42500948&&barCode=B1021TMZC00000042500948ZCZC0100014"
+  },
+  "fields": [
+    {
+      "key": "pdf417",
+      "type": "pdf417",
+      "region": [
+        26,
+        66,
+        380,
+        112
+      ],
+      "pos": [
+        28,
+        71
+      ],
+      "size": [
+        349,
+        39
+      ],
+      "columns": 4,
+      "level": 4,
+      "pad": 4
+    },
+    {
+      "key": "code_text",
+      "type": "text",
+      "region": [
+        60,
+        110,
+        400,
+        138
+      ],
+      "font": "heiti",
+      "mode": "fit_width",
+      "stroke": 1,
+      "blur": 0.2,
+      "alpha": 1.0,
+      "pad": 6,
+      "kill_dark": 214
+    },
+    {
+      "key": "cert_no",
+      "type": "text",
+      "region": [
+        960,
+        60,
+        1160,
+        115
+      ],
+      "font": "songti",
+      "mode": "fit_width",
+      "stroke": 0,
+      "blur": 0.65,
+      "alpha": 1.0,
+      "pad": 3
+    },
+    {
+      "key": "logo",
+      "type": "image",
+      "region": [
+        566,
+        616,
+        700,
+        700
+      ],
+      "center": [
+        631,
+        657
+      ],
+      "pad": 4,
+      "ink_thr": 200,
+      "color": [
+        18,
+        18,
+        18
+      ],
+      "_note": "高度按原图样面积自动匹配",
+      "scale": 2.0
+    },
+    {
+      "key": "class_no",
+      "type": "text",
+      "region": [
+        628,
+        910,
+        686,
+        952
+      ],
+      "font": "songti",
+      "mode": "natural",
+      "align": "center",
+      "stroke": 1,
+      "blur": 0.5,
+      "alpha": 1.0,
+      "pad": 3,
+      "valign": "bottom",
+      "size_ref": [
+        16,
+        905,
+        700,
+        955
+      ]
+    },
+    {
+      "key": "goods",
+      "type": "goods",
+      "region": [
+        17,
+        968,
+        1245,
+        1050
+      ],
+      "font": "songti",
+      "size": 29,
+      "spacing": -3.0,
+      "limit_pad": 102,
+      "prefix": "第 33 类：",
+      "prefix_stroke": 2,
+      "line_gap": 43,
+      "max_lines": 2,
+      "stroke": 0,
+      "blur": 0.15,
+      "pad": 2
+    },
+    {
+      "key": "holder",
+      "type": "text",
+      "region": [
+        215,
+        1125,
+        720,
+        1182
+      ],
+      "font": "songti",
+      "mode": "natural",
+      "stroke": 0,
+      "blur": 1.2,
+      "alpha": 1.0,
+      "pad": 3,
+      "wrap": true,
+      "wrap_w": 990,
+      "line_gap": 46,
+      "max_lines": 2
+    },
+    {
+      "key": "addr",
+      "type": "text",
+      "region": [
+        215,
+        1296,
+        960,
+        1354
+      ],
+      "font": "songti",
+      "mode": "natural",
+      "stroke": 0,
+      "blur": 1.15,
+      "alpha": 1.0,
+      "pad": 3,
+      "wrap": true,
+      "wrap_w": 990,
+      "line_gap": 46,
+      "max_lines": 3,
+      "prefer_break": true
+    },
+    {
+      "key": "date_from",
+      "type": "text",
+      "region": [
+        218,
+        1505,
+        462,
+        1552
+      ],
+      "font": "songti",
+      "mode": "fit_width",
+      "stroke": 0,
+      "blur": 0.65,
+      "alpha": 1.0,
+      "pad": 3
+    },
+    {
+      "key": "date_to",
+      "type": "text",
+      "region": [
+        683,
+        1508,
+        930,
+        1556
+      ],
+      "font": "songti",
+      "mode": "fit_width",
+      "stroke": 0,
+      "blur": 0.65,
+      "alpha": 1.0,
+      "pad": 3
+    },
+    {
+      "key": "qr",
+      "type": "qr",
+      "region": [
+        19,
+        1633,
+        196,
+        1811
+      ],
+      "size": 171,
+      "pos": [
+        22,
+        1636
+      ],
+      "pad": 1
+    }
+  ]
+}

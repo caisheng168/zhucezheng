@@ -1,0 +1,484 @@
+# -*- coding: utf-8 -*-
+"""
+cert_gen.py —— 证照模板改字引擎（配置驱动版，2024-11 定稿）
+
+设计要点
+  1. 一份 JSON 描述「模板 + 字段坐标 + 新内容」，换证书只改配置，不动代码
+  2. 字号按「二值墨迹高度」二分校准，和原文字逐像素等高
+  3. 小字/证号/日期用「字距求解」精确补齐原墨迹宽度，不做整行横向拉伸
+  4. 擦除后回填纸纹 + 清暗点 + 中值滤波，无残留噪点
+  5. 条码/二维码按原尺寸整数倍重绘，并做对比度增强
+
+用法
+  python tools/cert_gen.py --config cert/42500948.json
+  python tools/cert_gen.py --config cert/42500948.json --out custom.jpg --probe
+"""
+import argparse
+import json
+import os
+
+import numpy as np
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
+FONTS = {
+    "songti": r"C:\Windows\Fonts\simsun.ttc",
+    "songti_bold": r"C:\Windows\Fonts\simsunb.ttc",
+    "heiti": r"C:\Windows\Fonts\simhei.ttf",
+    "times": r"C:\Windows\Fonts\times.ttf",
+    "arial": r"C:\Windows\Fonts\arial.ttf",
+}
+
+
+# ---------------- 基础像素工具 ----------------
+def ink_mask(arr, thr=150):
+    R = arr[..., 0].astype(np.int16)
+    G = arr[..., 1].astype(np.int16)
+    B = arr[..., 2].astype(np.int16)
+    mx = np.maximum(np.maximum(R, G), B)
+    return (mx < thr) & ~((B - R > 55) & (B > 90))
+
+
+def ink_box(arr, region, thr=150):
+    x1, y1, x2, y2 = region
+    m = ink_mask(arr[y1:y2, x1:x2], thr)
+    if not m.any():
+        return None
+    ys, xs = np.where(m)
+    return (x1 + int(xs.min()), y1 + int(ys.min()), x1 + int(xs.max()) + 1, y1 + int(ys.max()) + 1)
+
+
+def ink_color(arr, box):
+    x1, y1, x2, y2 = box
+    sub = arr[y1:y2, x1:x2]
+    m = ink_mask(sub)
+    sel = sub.reshape(-1, 3)[m.reshape(-1)]
+    if len(sel) == 0:
+        return (24, 24, 24)
+    lum = sel.astype(np.float32) @ np.array([.299, .587, .114], np.float32)
+    sel = sel[lum <= np.percentile(lum, 40)]
+    return tuple(int(v) for v in np.median(sel, axis=0))
+
+
+def _clean_row(arr, y, x1, x2, step):
+    H = arr.shape[0]
+    yy = y + step * 2
+    for _ in range(50):
+        if not (0 <= yy < H):
+            return None
+        row = arr[yy, x1:x2]
+        if len(row) and (row.min(1) > 222).mean() > 0.985:
+            return np.median(row, axis=0)
+        yy += step
+    return None
+
+
+def clean_box(img, box, pad=3, feather=2, kill_dark=0):
+    """白纸底擦除：上下干净行中位色做垂直渐变 + 纸纹噪点 + 羽化 + 可选清暗点"""
+    arr = np.array(img).astype(np.float32)
+    H, W = arr.shape[:2]
+    x1, y1, x2, y2 = box
+    x1, y1 = max(0, x1 - pad), max(0, y1 - pad)
+    x2, y2 = min(W, x2 + pad), min(H, y2 + pad)
+
+    top = _clean_row(arr, y1, x1, x2, -1)
+    bot = _clean_row(arr, y2, x1, x2, +1)
+    if top is None and bot is None:
+        paper = arr[arr.min(2) > 235]
+        base = np.median(paper, axis=0) if len(paper) else np.array([252., 252., 252.])
+        top = bot = base
+    elif top is None:
+        top = bot
+    elif bot is None:
+        bot = top
+
+    # 取跨列中位色，避免把取样行的残留噪点纵向拉成条纹
+    top = np.median(np.asarray(top).reshape(-1, 3), axis=0) if np.asarray(top).ndim > 1 else np.asarray(top)
+    bot = np.median(np.asarray(bot).reshape(-1, 3), axis=0) if np.asarray(bot).ndim > 1 else np.asarray(bot)
+
+    h, w = y2 - y1, x2 - x1
+    t = np.linspace(0, 1, h)[:, None, None]
+    fill = top[None, None, :] * (1 - t) + bot[None, None, :] * t
+    rng = np.random.default_rng(abs(hash((x1, y1, x2, y2))) % (2 ** 32))
+    fill = fill + rng.normal(0, 2.2, (h, w, 3))
+
+    orig = arr[y1:y2, x1:x2]
+    if feather > 0:
+        a = np.ones((h, w, 1), np.float32)
+        f = min(feather, h // 2, w // 2)
+        for i in range(f):
+            v = (i + 1) / (f + 1)
+            a[i, :, 0] = v
+            a[-1 - i, :, 0] = v
+            a[:, i, 0] = np.minimum(a[:, i, 0], v)
+            a[:, -1 - i, 0] = np.minimum(a[:, -1 - i, 0], v)
+        fill = fill * a + orig * (1 - a)
+
+    arr[y1:y2, x1:x2] = np.clip(fill, 0, 255)
+
+    if kill_dark > 0:
+        reg = arr[y1:y2, x1:x2]
+        dark = reg.max(axis=2) < kill_dark
+        if dark.any():
+            paper = 252.0
+            sel = arr[arr.min(axis=2) > 245]
+            if len(sel):
+                paper = float(np.median(sel))
+            reg[dark] = paper
+        reg_img = Image.fromarray(np.clip(reg, 0, 255).astype(np.uint8)).filter(
+            ImageFilter.MedianFilter(3))
+        arr[y1:y2, x1:x2] = np.array(reg_img).astype(np.float32)
+
+    return Image.fromarray(arr.astype(np.uint8))
+
+
+# ---------------- 文字渲染（逐字排版 + 墨迹校准） ----------------
+def render_line(text, font_path, size, spacing=0.0, ss=4, stroke=0, blur=0.0, digit_boost=1.0):
+    f = ImageFont.truetype(font_path, max(1, size * ss))
+    # 原票面上数字比汉字压得轻（实测汉字 0.745、数字 0.92），用 digit_boost 还原
+    adv = [f.getlength(ch) * (digit_boost if ch.isdigit() else 1.0) for ch in text]
+    bbox = f.getbbox(text)
+    pad = 12 + stroke * 2
+    total = sum(adv) + spacing * ss * max(0, len(text) - 1)
+    W = int(total) + pad * 2 + 4
+    H = int(bbox[3] - bbox[1]) + pad * 2 + 4
+    canvas = Image.new("L", (max(2, W), max(2, H)), 0)
+    d = ImageDraw.Draw(canvas)
+    x = float(pad)
+    for ch, a in zip(text, adv):
+        d.text((x, pad - bbox[1]), ch, font=f, fill=255, stroke_width=stroke, stroke_fill=255)
+        x += a + spacing * ss
+    arr = np.array(canvas)
+    ys, xs = np.where(arr > 32)
+    if len(ys) == 0:
+        return canvas, 0, 0
+    m = canvas.crop((int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1))
+    if blur > 0:
+        m = m.filter(ImageFilter.GaussianBlur(blur))
+        a = np.array(m)
+        a[a < 10] = 0                     # 清掉羽化残留，避免贴图出现浅灰方框
+        m = Image.fromarray(a)
+    return m, m.width, m.height
+
+
+def fit_size(text, font_path, target_h, ss=2, spacing=0.0):
+    lo, hi, best = 6, 90, 6
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        _, _, h4 = render_line(text, font_path, mid, spacing, ss=ss)
+        if h4 / float(ss) <= target_h + 0.25:
+            best, lo = mid, mid + 1
+        else:
+            hi = mid - 1
+    return best
+
+
+def solve_spacing(text, font_path, size, target_w, ss=4):
+    n = len(text)
+    if n < 2:
+        return 0.0
+    sp = 0.0
+    for _ in range(3):
+        _, w4, _ = render_line(text, font_path, size, sp, ss=ss)
+        sp += (target_w - w4 / float(ss)) / (n - 1)
+    return sp
+
+
+ADDR_BREAKS = "路街道巷号区园楼室栋层里镇乡村镇省市区县侧畔口" + "；，、。：" 
+
+
+def wrap_text(text, font_path, size, max_w, prefer_break=False):
+    """按像素宽度折行。prefer_break=True 时优先在地址分隔字（路/号/区/园…）之后断开"""
+    f = ImageFont.truetype(font_path, size)
+    lines, cur = [], ""
+    for ch in text:
+        if f.getlength(cur + ch) <= max_w:
+            cur += ch
+            continue
+        cut = -1
+        if prefer_break:
+            # 先找标点（自然断句，不拆词）
+            for i in range(len(cur) - 1, max(0, int(len(cur) * 0.95)) - 1, -1):
+                if cur[i] in "，。；、：,.;:":
+                    cut = i
+                    break
+            # 没有标点再退回地址分隔字，且只认行尾 86% 之后的
+            if cut < 0:
+                for i in range(len(cur) - 1, max(0, int(len(cur) * 0.86)) - 1, -1):
+                    if cur[i] in ADDR_BREAKS:
+                        cut = i
+                        break
+        if cur.endswith(("（", "(")):
+            cut = len(cur) - 2
+        if cut > 0:
+            lines.append(cur[:cut + 1])
+            cur = cur[cut + 1:] + ch
+        else:
+            lines.append(cur)
+            cur = ch
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def paste_mask(img, mask, pos, color, alpha=1.0):
+    if alpha < 1.0:
+        mask = mask.point(lambda v: int(v * alpha))
+    img.paste(Image.new("RGB", mask.size, color), pos, mask)
+    return img
+
+
+def draw_field(img, ink, text, font_path, mode="natural", color=None, limit_w=None,
+               ss=4, stroke=0, blur=1.2, alpha=1.0, size=None, spacing=None, center=False,
+               bottom=False, hscale=1.0, dx=0, dy=0, max_w=None, digit_boost=1.0, center_box=None):
+    x0, y0, x1, y1 = ink
+    th, tw = y1 - y0, x1 - x0
+    if size is None:
+        size = fit_size(text, font_path, th, ss=2)
+    if spacing is None:
+        spacing = solve_spacing(text, font_path, size, tw, ss=4) if mode == "fit_width" else 0.0
+    m, _, _ = render_line(text, font_path, size, spacing, ss=ss, stroke=stroke, blur=blur, digit_boost=digit_boost)
+    m = m.resize((max(1, round(m.width / ss)), max(1, round(m.height / ss))), Image.LANCZOS)
+    if hscale != 1.0:
+        m = m.resize((max(1, round(m.width * hscale)), max(1, m.height)), Image.LANCZOS)
+    if max_w and m.width > max_w:          # 只压宽，不缩高
+        m = m.resize((int(max_w), m.height), Image.LANCZOS)
+    if limit_w and m.width > limit_w:
+        m = m.resize((limit_w, max(1, round(m.height * limit_w / m.width))), Image.LANCZOS)
+    if center:
+        cb = center_box or (x0, x0 + tw)
+        px = cb[0] + ((cb[1] - cb[0]) - m.width) // 2
+    else:
+        px = x0
+    py = y0 + (th - m.height) if bottom else y0
+    return paste_mask(img, m, (px + dx, py + dy), color or (24, 24, 24), alpha)
+
+
+# ---------------- 条码 / 二维码 ----------------
+def render_pdf417(data, width, height, columns=4, security_level=4):
+    import pdf417gen
+    codes = pdf417gen.encode(data, columns=columns, security_level=security_level)
+    grid = pdf417gen.render_image(codes, scale=1, ratio=1, padding=0).convert("L")
+    bmp = grid.resize((width, height), Image.LANCZOS)
+    arr = np.array(bmp).astype(np.float32)
+    arr = np.clip((arr - 128.0) * 1.45 + 128.0, 0, 255)
+    return Image.fromarray(arr.astype(np.uint8)), len(codes)
+
+
+def render_qr(data, size):
+    import qrcode
+    for lvl in (qrcode.constants.ERROR_CORRECT_L, qrcode.constants.ERROR_CORRECT_M,
+                qrcode.constants.ERROR_CORRECT_Q, qrcode.constants.ERROR_CORRECT_H):
+        qr = qrcode.QRCode(border=0, error_correction=lvl)
+        qr.add_data(data)
+        qr.make(fit=True)
+        matrix = qr.get_matrix()
+        n = len(matrix)
+        scale = max(1, int(round(size / n)))
+        qm = Image.new("L", (n * scale, n * scale), 255)
+        d = ImageDraw.Draw(qm)
+        for yy, row in enumerate(matrix):
+            for xx, v in enumerate(row):
+                if v:
+                    d.rectangle([xx * scale, yy * scale, xx * scale + scale - 1,
+                                 yy * scale + scale - 1], fill=0)
+        if qm.width != size:
+            qm = qm.resize((size, size), Image.LANCZOS)
+            arr = np.array(qm).astype(np.float32)
+            arr = np.clip((arr - 128.0) * 1.35 + 128.0, 0, 255)
+            qm = Image.fromarray(arr.astype(np.uint8))
+        return qm, n, lvl
+
+
+# ---------------- 主流程 ----------------
+def build(cfg, out_path=None, probe=False):
+    tpl = Image.open(cfg["template"]).convert("RGB")
+    arr0 = np.array(tpl)
+    img = tpl.copy()
+    W, H = tpl.size
+    data = cfg.get("data", {})
+    log = []
+
+    for f in cfg["fields"]:
+        key = f["key"]
+        val = data.get(key)
+        typ = f["type"]
+        region = tuple(f["region"])
+
+        if probe:
+            b = ink_box(arr0, region)
+            log.append("[probe] %-10s %s -> ink %s" % (key, region, b))
+            continue
+        if val in (None, ""):
+            continue
+
+        if typ == "pdf417":
+            pad = f.get("pad", 4)
+            img = clean_box(img, region, pad=pad)
+            bc, rows = render_pdf417(val, f.get("size", [349, 39])[0], f.get("size", [349, 39])[1],
+                                     f.get("columns", 4), f.get("level", 4))
+            pos = tuple(f.get("pos", (region[0] + 2, region[1] + 5)))
+            img.paste(Image.merge("RGB", [bc] * 3), pos)
+            log.append("pdf417 rows=%d rows_px=%s" % (rows, f.get("size", [349, 39])))
+
+        elif typ == "qr":
+            size = f.get("size", 171)
+            img = clean_box(img, region, pad=f.get("pad", 1), feather=1)
+            qm, n, lvl = render_qr(val, size)
+            img.paste(Image.merge("RGB", [qm] * 3), tuple(f.get("pos", (region[0], region[1]))))
+            log.append("qr modules=%d ecl=%d size=%d" % (n, lvl, size))
+
+        elif typ == "image":
+            src_rgb = Image.open(val).convert("RGB")
+            src = src_rgb.convert("L")
+            a = np.array(src)
+            mm = a < f.get("ink_thr", 200)
+            ys, xs = np.where(mm)
+            box = (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
+            crop = src.crop(box)
+            crop_rgb = src_rgb.crop(box)
+            ratio = crop.width / float(crop.height)
+            if f.get("height"):
+                lh = int(f["height"])
+            else:
+                b = ink_box(arr0, region) or region
+                area = max(1.0, float((b[2] - b[0]) * (b[3] - b[1])))
+                lh = int(round((area / ratio) ** 0.5))
+            lw = max(1, round(crop.width * lh / crop.height))
+            sc = float(f.get("scale", 1.0))
+            if sc != 1.0:
+                lw, lh = max(1, int(round(lw * sc))), max(1, int(round(lh * sc)))
+            cx, cy = f.get("center", ((region[0] + region[2]) // 2, (region[1] + region[3]) // 2))
+            # 擦除范围随图样尺寸扩张，避免旧图样边缘露出
+            half_w = max(lw // 2 + 8, (region[2] - region[0]) // 2 + 6)
+            half_h = max(lh // 2 + 8, (region[3] - region[1]) // 2 + 6)
+            cr = (max(0, cx - half_w), max(0, cy - half_h),
+                  min(W, cx + half_w), min(H, cy + half_h))
+            img = clean_box(img, cr, pad=2)
+            crop = crop.resize((lw, lh), Image.LANCZOS)
+            crop_rgb = crop_rgb.resize((lw, lh), Image.LANCZOS)
+            if f.get("color"):
+                alpha_m = Image.fromarray((255 - np.array(crop)).astype(np.uint8))
+                img.paste(Image.new("RGB", crop.size, tuple(f["color"])),
+                          (cx - lw // 2, cy - lh // 2), alpha_m)
+            else:
+                rgb = np.array(crop_rgb).astype(np.int16)
+                sat = rgb.max(axis=2) - rgb.min(axis=2)
+                if (sat > 25).mean() > 0.02:
+                    # 彩色图样：原样贴回，不做任何灰度/透明度处理，保证颜色不变
+                    img.paste(crop_rgb, (cx - lw // 2, cy - lh // 2))
+                else:
+                    # 单色图样：按最暗通道算覆盖率，白底透明
+                    a_ch = 255 - rgb.min(axis=2)
+                    alpha_m = Image.fromarray(np.clip(a_ch, 0, 255).astype(np.uint8))
+                    img.paste(crop_rgb, (cx - lw // 2, cy - lh // 2), alpha_m)
+            log.append("image %dx%d at (%d,%d) scale=%.2f" % (lw, lh, cx - lw // 2, cy - lh // 2, sc))
+
+        elif typ == "text":
+            ink = ink_box(arr0, region)
+            if ink is None:
+                log.append("!! %s 区域无墨迹，跳过" % key)
+                continue
+            img = clean_box(img, ink, pad=f.get("pad", 3), kill_dark=f.get("kill_dark", 0))
+            font_path = f.get("font_path") or FONTS[f.get("font", "songti")]
+            fsize = f.get("size")
+            if fsize is None and f.get("size_ref"):
+                ref = ink_box(arr0, tuple(f["size_ref"]))
+                if ref:
+                    fsize = fit_size("国", font_path, ref[3] - ref[1], ss=2)
+            if f.get("wrap"):
+                # 不缩小字号：按原墨迹高定字号，超宽就折行
+                if fsize is None:
+                    fsize = fit_size(str(val), font_path, ink[3] - ink[1], ss=2)
+                wmax = int(f.get("wrap_w", 1000))
+                gap = int(f.get("line_gap", 46))
+                lines = wrap_text(str(val), font_path, fsize, wmax, bool(f.get("prefer_break")))[:int(f.get("max_lines", 3))]
+                yy = ink[1]
+                for ln in lines:
+                    img = draw_field(img, (ink[0], yy, ink[0] + wmax, yy + (ink[3] - ink[1])),
+                                     ln, font_path, "natural",
+                                     color=color, size=fsize, stroke=f.get("stroke", 0),
+                                     blur=f.get("blur", 1.15), alpha=f.get("alpha", 1.0))
+                    yy += gap
+                log.append("text %-10s ink=%s size=%d lines=%d" % (key, ink, fsize, len(lines)))
+                continue
+            img = draw_field(img, ink, str(val), font_path, f.get("mode", "natural"),
+                             color=tuple(f["color"]) if f.get("color") else ink_color(arr0, ink),
+                             limit_w=f.get("limit_w"), stroke=f.get("stroke", 0),
+                             blur=f.get("blur", 0.9), alpha=f.get("alpha", 1.0),
+                               size=fsize, spacing=f.get("spacing"), center=(f.get("align") == "center"), center_box=f.get("center_box"),
+                               bottom=(f.get("valign") == "bottom"),
+                               hscale=float(f.get("hscale", 1.0)),
+                               digit_boost=float(f.get("digit_boost", 1.0)),
+                               dx=int(f.get("dx", 0)), dy=int(f.get("dy", 0)),
+                               max_w=f.get("max_w"))
+            log.append("text %-10s ink=%s" % (key, ink))
+
+        elif typ == "goods":
+            """商品/服务项目：多行、前缀加粗、按标点折行、可选负字距"""
+            img = clean_box(img, region, pad=f.get("pad", 2))
+            color = tuple(f["color"]) if f.get("color") else ink_color(arr0, ink_box(arr0, region))
+            line_ink = ink_box(arr0, region)
+            th = f.get("line_h", line_ink[3] - line_ink[1])
+            tw = f.get("line_w", line_ink[2] - line_ink[0])
+            gsize = int(f.get("size", 29))
+            gsp = float(f.get("spacing", -3.0))
+            limit = tw + int(f.get("limit_pad", 102))
+            prefix = f.get("prefix", "")
+            line_gap = int(f.get("line_gap", 43))
+            max_lines = int(f.get("max_lines", 2))
+            _f = ImageFont.truetype(FONTS[f.get("font", "songti")], gsize)
+            # 纯按像素宽度排满：不看标点、不拆断点回退、不压缩字距
+            lines, cur, wsum = [], "", 0.0
+            for ch in str(val):
+                cw = _f.getlength(ch) + gsp
+                if cur and wsum + cw > limit:
+                    lines.append(cur)
+                    cur, wsum = "", 0.0
+                cur += ch
+                wsum += cw
+            if cur:
+                lines.append(cur)
+
+            y = line_ink[1]
+            for i, ln in enumerate(lines[:max_lines]):
+                img = draw_field(img, (line_ink[0], y, line_ink[0] + tw, y + th), ln,
+                                 FONTS[f.get("font", "songti")], "natural", color=color,
+                                 size=gsize, spacing=gsp, stroke=f.get("stroke", 0),
+                                 blur=f.get("blur", 0.15), alpha=f.get("alpha", 1.0),
+                                 hscale=float(f.get("hscale", 1.0)))
+                if i == 0 and prefix and ln.startswith(prefix):
+                    mp, _, _ = render_line(prefix, FONTS[f.get("font", "songti")], gsize, gsp,
+                                           ss=4, stroke=f.get("prefix_stroke", 2),
+                                           blur=f.get("blur", 0.15))
+                    mp = mp.resize((max(1, round(mp.width / 4 * float(f.get("hscale", 1.0)))),
+                                    max(1, round(mp.height / 4))), Image.LANCZOS)
+                    img = paste_mask(img, mp, (line_ink[0], y), color, 1.0)
+                y += line_gap
+            log.append("goods size=%d sp=%.1f lines=%d" % (gsize, gsp, len(lines)))
+
+    if probe:
+        return None, log
+
+    out = out_path or cfg.get("output", "out.jpg")
+    img.save(out, quality=cfg.get("quality", 90), subsampling=0)
+    return img, log
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--config", required=True)
+    ap.add_argument("--out", default=None)
+    ap.add_argument("--probe", action="store_true", help="只探测各字段墨迹框，不生成")
+    a = ap.parse_args()
+    cfg = json.load(open(a.config, encoding="utf-8"))
+    img, log = build(cfg, a.out, a.probe)
+    if a.probe:
+        print("\n".join(log))
+        return
+    print("saved", a.out or cfg.get("output"))
+    for l in log:
+        print("   ", l)
+
+
+if __name__ == "__main__":
+    main()
